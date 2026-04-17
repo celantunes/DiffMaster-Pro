@@ -15,7 +15,8 @@ import {
   Trash2, 
   FileText,
   CheckCircle2,
-  RefreshCw
+  RefreshCw,
+  ArrowLeftRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
@@ -42,11 +43,26 @@ interface AlignedRow {
   id: string;
 }
 
-const CharacterDiff = ({ text1, text2, type }: { text1: string | null, text2: string | null, type: 'left' | 'right' }) => {
+const CharacterDiff = ({ text1, text2, type, ignoreWhitespace }: { text1: string | null, text2: string | null, type: 'left' | 'right', ignoreWhitespace: boolean }) => {
   const t1 = text1 || "";
   const t2 = text2 || "";
   
-  const diffs = useMemo(() => diffChars(t1, t2), [t1, t2]);
+  const diffs = useMemo(() => {
+    let result = diffChars(t1, t2);
+    if (ignoreWhitespace) {
+      // If ignoring whitespace, we filter out parts that are JUST whitespace and marked as added/removed
+      // But we should keep them if they are part of a larger change?
+      // Actually, if we want to "ignore" them, they should be treated as unchanged or just not highlighted.
+      // A better way is to normalize the text for comparison or filter results.
+      return result.filter(part => {
+        if ((part.added || part.removed) && part.value.trim() === "") {
+          return false;
+        }
+        return true;
+      });
+    }
+    return result;
+  }, [t1, t2, ignoreWhitespace]);
   
   return (
     <>
@@ -82,14 +98,34 @@ export default function App() {
   const [rightText, setRightText] = useState("Apple\nBanana\nCitrus\nFig\nGrape");
   const [isExporting, setIsExporting] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
+  const [ignoreWhitespace, setIgnoreWhitespace] = useState(false);
+  const [horizontalScroll, setHorizontalScroll] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sideARef = useRef<HTMLDivElement>(null);
+  const sideBRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
   const minimapRef = useRef<HTMLDivElement>(null);
+
+  // Synchronized scroll logic
+  const isSyncing = useRef(false);
+  const syncScroll = useCallback((e: React.UIEvent<HTMLDivElement>, source: 'A' | 'B' | 'rail') => {
+    if (isSyncing.current) return;
+    isSyncing.current = true;
+    
+    const scrollTop = e.currentTarget.scrollTop;
+    
+    if (source !== 'A' && sideARef.current) sideARef.current.scrollTop = scrollTop;
+    if (source !== 'B' && sideBRef.current) sideBRef.current.scrollTop = scrollTop;
+    if (source !== 'rail' && railRef.current) railRef.current.scrollTop = scrollTop;
+    
+    isSyncing.current = false;
+  }, []);
 
   // Compute the diff and align rows
   const diffRows = useMemo(() => {
-    const changes = diffLines(leftText, rightText);
+    const changes = diffLines(leftText, rightText, { ignoreWhitespace });
     const rows: AlignedRow[] = [];
     
     let leftLineCounter = 1;
@@ -130,10 +166,22 @@ export default function App() {
           const lCont = removedLines[j] !== undefined ? removedLines[j] : null;
           const rCont = addedLines[j] !== undefined ? addedLines[j] : null;
           
+          let rowType: 'modified' | 'unchanged' | 'added' | 'removed' = 'modified';
+          
+          // If ignoring whitespace, check if the change is only whitespace
+          if (ignoreWhitespace && lCont !== null && rCont !== null) {
+            if (lCont.trim() === rCont.trim()) {
+              rowType = 'unchanged';
+            }
+          }
+          
+          if (lCont === null) rowType = 'added';
+          if (rCont === null) rowType = 'removed';
+          
           rows.push({
             left: { content: lCont, lineNumber: lCont !== null ? leftLineCounter++ : null },
             right: { content: rCont, lineNumber: rCont !== null ? rightLineCounter++ : null },
-            type: 'modified',
+            type: rowType,
             id: `row-mod-${Math.random().toString(36).substring(2, 9)}`
           });
         }
@@ -145,10 +193,15 @@ export default function App() {
         if (lines[lines.length - 1] === '' && lines.length > 1) lines.pop();
         
         lines.forEach((line) => {
+          let rowType: 'removed' | 'unchanged' = 'removed';
+          if (ignoreWhitespace && line.trim() === "") {
+            rowType = 'unchanged';
+          }
+
           rows.push({
             left: { content: line, lineNumber: leftLineCounter++ },
             right: { content: null, lineNumber: null },
-            type: 'removed',
+            type: rowType,
             id: `row-rem-${Math.random().toString(36).substring(2, 9)}`
           });
         });
@@ -160,10 +213,15 @@ export default function App() {
         if (lines[lines.length - 1] === '' && lines.length > 1) lines.pop();
         
         lines.forEach((line) => {
+          let rowType: 'added' | 'unchanged' = 'added';
+          if (ignoreWhitespace && line.trim() === "") {
+            rowType = 'unchanged';
+          }
+
           rows.push({
             left: { content: null, lineNumber: null },
             right: { content: line, lineNumber: rightLineCounter++ },
-            type: 'added',
+            type: rowType,
             id: `row-add-${Math.random().toString(36).substring(2, 9)}`
           });
         });
@@ -172,7 +230,7 @@ export default function App() {
     }
 
     return rows;
-  }, [leftText, rightText]);
+  }, [leftText, rightText, ignoreWhitespace]);
 
   const handleMergeToRight = useCallback((row: AlignedRow) => {
     const leftContent = row.left.content;
@@ -252,17 +310,22 @@ export default function App() {
   };
 
   const handleMinimapClick = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
-    if (!scrollContainerRef.current || !minimapRef.current) return;
+    if (!sideARef.current || !minimapRef.current) return;
     
     const rect = minimapRef.current.getBoundingClientRect();
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
     const clickY = clientY - rect.top;
     const percentage = clickY / rect.height;
     
-    const scrollHeight = scrollContainerRef.current.scrollHeight;
-    const clientHeight = scrollContainerRef.current.clientHeight;
+    const scrollHeight = sideARef.current.scrollHeight;
+    const clientHeight = sideARef.current.clientHeight;
     
-    scrollContainerRef.current.scrollTop = percentage * (scrollHeight - clientHeight);
+    const targetScroll = percentage * (scrollHeight - clientHeight);
+    
+    // Trigger sync
+    if (sideARef.current) sideARef.current.scrollTop = targetScroll;
+    if (sideBRef.current) sideBRef.current.scrollTop = targetScroll;
+    if (railRef.current) railRef.current.scrollTop = targetScroll;
   };
 
   const handleMergeAllRaw = () => {
@@ -277,6 +340,12 @@ export default function App() {
   const clear = () => {
     setLeftText("");
     setRightText("");
+  };
+
+  const handleSwap = () => {
+    const temp = leftText;
+    setLeftText(rightText);
+    setRightText(temp);
   };
 
   const handleExport = () => {
@@ -313,6 +382,31 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button 
+            onClick={handleSwap}
+            className="btn px-4 py-2 border border-border-main rounded-md text-sm font-medium text-text-main bg-bg-secondary hover:bg-bg-primary transition-all flex items-center gap-2 cursor-pointer"
+            title="Inverter Lados (Swap)"
+          >
+            <ArrowLeftRight size={16} /> Inverter Lados
+          </button>
+          <label className="flex items-center gap-2 px-3 py-1.5 border border-border-main rounded-md text-[11px] font-bold uppercase transition-all hover:bg-bg-primary cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={ignoreWhitespace}
+              onChange={(e) => setIgnoreWhitespace(e.target.checked)}
+              className="accent-acc-blue"
+            />
+            Ignorar Espaços
+          </label>
+          <label className="flex items-center gap-2 px-3 py-1.5 border border-border-main rounded-md text-[11px] font-bold uppercase transition-all hover:bg-bg-primary cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={horizontalScroll}
+              onChange={(e) => setHorizontalScroll(e.target.checked)}
+              className="accent-acc-blue"
+            />
+            Scroll Horizontal
+          </label>
           <button 
             onClick={handleCopyToClipboard}
             className="btn px-4 py-2 border border-border-main rounded-md text-sm font-medium text-text-main bg-bg-secondary hover:bg-bg-primary transition-all flex items-center gap-2 cursor-pointer"
@@ -353,7 +447,10 @@ export default function App() {
             <textarea 
               value={leftText}
               onChange={(e) => setLeftText(e.target.value)}
-              className="w-full h-32 p-4 bg-bg-secondary border border-border-main rounded-lg font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-acc-blue/20 focus:border-acc-blue transition-all resize-none shadow-sm"
+              className={cn(
+                "w-full h-32 p-4 bg-bg-secondary border border-border-main rounded-lg font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-acc-blue/20 focus:border-acc-blue transition-all resize-none shadow-sm",
+                horizontalScroll ? "whitespace-pre overflow-x-auto" : "whitespace-pre-wrap"
+              )}
               placeholder="Cole o texto original aqui..."
             />
           </div>
@@ -364,7 +461,10 @@ export default function App() {
             <textarea 
               value={rightText}
               onChange={(e) => setRightText(e.target.value)}
-              className="w-full h-32 p-4 bg-bg-secondary border border-border-main rounded-lg font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-acc-blue/20 focus:border-acc-blue transition-all resize-none shadow-sm"
+              className={cn(
+                "w-full h-32 p-4 bg-bg-secondary border border-border-main rounded-lg font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-acc-blue/20 focus:border-acc-blue transition-all resize-none shadow-sm",
+                horizontalScroll ? "whitespace-pre overflow-x-auto" : "whitespace-pre-wrap"
+              )}
               placeholder="Cole a versão para comparar aqui..."
             />
           </div>
@@ -410,122 +510,145 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex-1 flex overflow-hidden relative">
-            <div 
-              ref={scrollContainerRef}
-              className="overflow-auto flex-1 font-mono text-[13px] line-height-[1.6] scroll-smooth"
-            >
-              <div className="grid grid-cols-[1fr_40px_1fr] min-w-[800px] border-collapse relative">
-                {/* Header row */}
-                <div className="sticky top-0 bg-bg-primary border-b border-border-main p-2 px-4 flex items-center justify-between z-10 text-[11px] font-bold text-text-muted uppercase tracking-wider">
+          <div className="flex-1 flex overflow-hidden relative border border-border-main rounded-lg shadow-sm">
+            <div className="flex-1 flex min-w-0 bg-white overflow-hidden">
+              {/* Lado A Column */}
+              <div 
+                ref={sideARef}
+                onScroll={e => syncScroll(e, 'A')}
+                className="flex-1 basis-0 min-w-0 overflow-auto font-mono text-[13px] line-height-[1.6] border-r border-border-main hide-v-scroll"
+              >
+                <div className="sticky top-0 bg-bg-primary border-b border-border-main p-2 px-4 flex items-center justify-between z-10 text-[11px] font-bold text-text-muted uppercase tracking-wider w-full min-w-fit">
                   <div className="flex items-center gap-4">
                     <span className="w-6 shrink-0">Sel.</span>
                     <span>ORIGINAL (LADO A)</span>
                   </div>
                   <span className="opacity-40">Linha</span>
                 </div>
-                <div className="sticky top-0 bg-slate-100 border-b border-border-main z-20"></div>
-                <div className="sticky top-0 bg-bg-primary border-b border-border-main p-2 px-4 flex items-center justify-between z-10 text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                <div className="min-w-fit w-full">
+                  {diffRows.map((row) => (
+                    <motion.div 
+                      key={`left-${row.id}`}
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      onClick={() => toggleRowSelection(row.id, row.type !== 'unchanged')}
+                      className={cn(
+                        "flex items-stretch border-b border-slate-50 cursor-pointer transition-colors w-full",
+                        row.type === 'removed' ? "bg-acc-red/50 hover:bg-acc-red/70" : 
+                        row.type === 'modified' ? "bg-amber-50 hover:bg-amber-100" : 
+                        "bg-white hover:bg-slate-50",
+                        selectedRowIds.has(row.id) && "ring-2 ring-acc-blue ring-inset z-10"
+                      )}
+                    >
+                      <div className="w-10 flex items-center justify-center shrink-0 border-r border-slate-100 py-1">
+                        {row.type !== 'unchanged' && (
+                          <div className={cn(
+                            "w-4 h-4 border-2 rounded transition-all flex items-center justify-center",
+                            selectedRowIds.has(row.id) ? "bg-acc-blue border-acc-blue" : "border-slate-300 bg-white"
+                          )}>
+                            {selectedRowIds.has(row.id) && <CheckCircle2 size={12} className="text-white" />}
+                          </div>
+                        )}
+                      </div>
+                      <div className={cn(
+                        "w-12 flex-shrink-0 text-right pr-3 font-medium border-r border-slate-100 py-1 text-[11px] select-none",
+                        row.type === 'removed' ? "bg-acc-red text-acc-red-dark" : "text-slate-300 bg-slate-50/50"
+                      )}>
+                        {row.left.lineNumber || ''}
+                      </div>
+                      <div className={cn(
+                        "flex-1 px-3 py-1 min-h-[24px] flex items-center pr-10",
+                        horizontalScroll ? "whitespace-pre overflow-visible" : "whitespace-pre-wrap break-all"
+                      )}>
+                        <span className={cn(row.type === 'removed' && "text-acc-red-dark")}>
+                          {row.type === 'modified' ? (
+                            <CharacterDiff text1={row.left.content} text2={row.right.content} type="left" ignoreWhitespace={ignoreWhitespace} />
+                          ) : (
+                            row.left.content === null ? '' : row.left.content
+                          )}
+                        </span>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Middle Rail Column */}
+              <div 
+                ref={railRef}
+                className="w-[40px] bg-slate-100 border-r border-border-main overflow-hidden shrink-0 flex-shrink-0"
+              >
+                <div className="sticky top-0 bg-slate-200 border-b border-border-main z-10 h-8 flex items-center justify-center">
+                  <span className="text-[10px] font-bold text-slate-400">#</span>
+                </div>
+                {diffRows.map((row) => (
+                  <div key={`rail-${row.id}`} className="h-[25px] flex items-center justify-center border-b border-slate-200 bg-slate-100">
+                    {row.type !== 'unchanged' && (
+                      <button 
+                        onClick={() => handleMergeToRight(row)}
+                        className="w-5 h-5 flex items-center justify-center text-acc-blue hover:bg-acc-blue hover:text-white rounded-full transition-all cursor-pointer"
+                      >
+                        <ArrowRight size={10} strokeWidth={3} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Lado B Column */}
+              <div 
+                ref={sideBRef}
+                onScroll={e => syncScroll(e, 'B')}
+                className="flex-1 basis-0 min-w-0 overflow-auto font-mono text-[13px] line-height-[1.6]"
+              >
+                <div className="sticky top-0 bg-bg-primary border-b border-border-main p-2 px-4 flex items-center justify-between z-10 text-[11px] font-bold text-text-muted uppercase tracking-wider w-full min-w-fit">
                   <span className="opacity-40">Linha</span>
                   <span>DESTINO (LADO B)</span>
                 </div>
-
-                {/* Diff rows */}
-                <AnimatePresence initial={false}>
+                <div className="min-w-fit w-full">
                   {diffRows.map((row) => (
-                    <React.Fragment key={row.id}>
-                      {/* Left Column */}
-                      <motion.div 
-                        layout
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        onClick={() => toggleRowSelection(row.id, row.type !== 'unchanged')}
-                        className={cn(
-                          "flex items-stretch border-b border-slate-50 cursor-pointer transition-colors",
-                          row.type === 'removed' ? "bg-acc-red/50 hover:bg-acc-red/70" : 
-                          row.type === 'modified' ? "bg-amber-50 hover:bg-amber-100" : 
-                          "bg-white hover:bg-slate-50",
-                          selectedRowIds.has(row.id) && "ring-2 ring-acc-blue ring-inset z-10"
-                        )}
-                      >
-                        <div className="w-10 flex items-center justify-center shrink-0 border-r border-slate-100">
-                          {row.type !== 'unchanged' && (
-                            <div className={cn(
-                              "w-4 h-4 border-2 rounded transition-all flex items-center justify-center",
-                              selectedRowIds.has(row.id) ? "bg-acc-blue border-acc-blue" : "border-slate-300 bg-white"
-                            )}>
-                              {selectedRowIds.has(row.id) && <CheckCircle2 size={12} className="text-white" />}
-                            </div>
-                          )}
-                        </div>
-                        <div className={cn(
-                          "w-12 flex-shrink-0 text-right pr-3 font-medium border-r border-slate-100 py-1 text-[11px] select-none",
-                          row.type === 'removed' ? "bg-acc-red text-acc-red-dark" : "text-slate-300 bg-slate-50/50"
-                        )}>
-                          {row.left.lineNumber || ''}
-                        </div>
-                        <div className="flex-1 px-3 py-1 min-h-[24px] break-all whitespace-pre-wrap flex items-center">
-                          <span className={cn(row.type === 'removed' && "text-acc-red-dark")}>
-                            {row.type === 'modified' ? (
-                              <CharacterDiff text1={row.left.content} text2={row.right.content} type="left" />
-                            ) : (
-                              row.left.content === null ? '' : row.left.content
-                            )}
-                          </span>
-                        </div>
-                      </motion.div>
-
-                      {/* Middle rail / Actions */}
-                      <div className="flex flex-col items-center justify-center bg-slate-100 border-b border-slate-200 py-1">
-                        {row.type !== 'unchanged' && (
-                          <button 
-                            onClick={() => handleMergeToRight(row)}
-                            className="w-7 h-7 flex items-center justify-center text-acc-blue hover:bg-acc-blue hover:text-white rounded-full transition-all cursor-pointer"
-                          >
-                            <ArrowRight size={14} strokeWidth={3} />
-                          </button>
-                        )}
+                    <motion.div 
+                      key={`right-${row.id}`}
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className={cn(
+                        "flex items-stretch border-b border-slate-50 w-full",
+                        row.type === 'added' ? "bg-acc-green/50" : 
+                        row.type === 'modified' ? "bg-amber-50" : 
+                        "bg-white"
+                      )}
+                    >
+                      <div className={cn(
+                        "w-12 flex-shrink-0 text-right pr-3 font-medium border-r border-slate-100 py-1 text-[11px] select-none",
+                        row.type === 'added' ? "bg-acc-green text-acc-green-dark" : "text-slate-300 bg-slate-50/50"
+                      )}>
+                        {row.right.lineNumber || ''}
                       </div>
-
-                      {/* Right Column */}
-                      <motion.div 
-                        layout
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className={cn(
-                          "flex items-stretch border-b border-slate-50",
-                          row.type === 'added' ? "bg-acc-green/50" : 
-                          row.type === 'modified' ? "bg-amber-50" : 
-                          "bg-white"
-                        )}
-                      >
-                        <div className={cn(
-                          "w-12 flex-shrink-0 text-right pr-3 font-medium border-r border-slate-100 py-1 text-[11px] select-none",
-                          row.type === 'added' ? "bg-acc-green text-acc-green-dark" : "text-slate-300 bg-slate-50/50"
-                        )}>
-                          {row.right.lineNumber || ''}
-                        </div>
-                        <div className="flex-1 px-3 py-1 min-h-[24px] break-all whitespace-pre-wrap flex items-center">
-                          <span className={cn(row.type === 'added' && "text-acc-green-dark")}>
-                            {row.type === 'modified' ? (
-                              <CharacterDiff text1={row.left.content} text2={row.right.content} type="right" />
-                            ) : (
-                              row.right.content === null ? '' : row.right.content
-                            )}
-                          </span>
-                        </div>
-                      </motion.div>
-                    </React.Fragment>
+                      <div className={cn(
+                        "flex-1 px-3 py-1 min-h-[24px] flex items-center pr-10",
+                        horizontalScroll ? "whitespace-pre overflow-visible" : "whitespace-pre-wrap break-all"
+                      )}>
+                        <span className={cn(row.type === 'added' && "text-acc-green-dark")}>
+                          {row.type === 'modified' ? (
+                            <CharacterDiff text1={row.left.content} text2={row.right.content} type="right" ignoreWhitespace={ignoreWhitespace} />
+                          ) : (
+                            row.right.content === null ? '' : row.right.content
+                          )}
+                        </span>
+                      </div>
+                    </motion.div>
                   ))}
-                </AnimatePresence>
-
-                {diffRows.length === 0 && (
-                  <div className="col-span-3 p-16 flex flex-col items-center justify-center text-text-muted opacity-40">
-                    <Copy size={64} strokeWidth={1.5} className="mb-4" />
-                    <p className="font-semibold text-lg uppercase tracking-tight">Nenhum dado detectado</p>
-                  </div>
-                )}
+                </div>
               </div>
+
+              {diffRows.length === 0 && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-text-muted opacity-40 bg-white z-20">
+                  <Copy size={64} strokeWidth={1.5} className="mb-4" />
+                  <p className="font-semibold text-lg uppercase tracking-tight">Nenhum dado detectado</p>
+                </div>
+              )}
             </div>
 
             {/* Minimap Sidebar */}
