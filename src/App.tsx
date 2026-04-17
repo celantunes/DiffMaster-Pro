@@ -21,7 +21,8 @@ import {
   Minimize2,
   BookOpen,
   X,
-  Settings2
+  Settings2,
+  History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
@@ -50,6 +51,15 @@ interface AlignedRow {
   };
   type: DiffType;
   id: string;
+}
+
+interface HistoryEntry {
+  id: string;
+  timestamp: string;
+  source: string;
+  lineNumber: number | string;
+  oldValue: string | null;
+  newValue: string;
 }
 
 const CharacterDiff = ({ text1, text2, mode, ignoreWhitespace }: { text1: string | null, text2: string | null, mode: 'base' | 'diff', ignoreWhitespace: boolean }) => {
@@ -109,6 +119,8 @@ export default function App() {
   const [horizontalScroll, setHorizontalScroll] = useState(false);
   const [isFullWidth, setIsFullWidth] = useState(false);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -359,19 +371,26 @@ export default function App() {
     const leftContent = row.left.content;
     const rightContent = row.right.content;
 
-    // We need to modify rightText based on what happened
-    // This is tricky with raw strings. It's easier if we re-generate the text from the rows.
-    // For a cleaner merge implementation, we'll update the rightText by processing the rows.
-    
+    if (leftContent === rightContent) return;
+
+    // Record History
+    const newEntry: HistoryEntry = {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: new Date().toLocaleTimeString(),
+      source: 'A → B',
+      lineNumber: row.left.lineNumber || 'N/A',
+      oldValue: rightContent,
+      newValue: leftContent || ""
+    };
+    setHistory(prev => [...prev, newEntry]);
+
     let newRightLines: string[] = [];
     diffRows.forEach(r => {
-      // If this is the row clicked, we take from left.
       if (r.id === row.id) {
         if (leftContent !== null) {
           newRightLines.push(leftContent);
         }
       } else {
-        // Otherwise keep current right content if exists
         if (r.right.content !== null) {
           newRightLines.push(r.right.content);
         }
@@ -382,10 +401,21 @@ export default function App() {
   }, [diffRows]);
 
   const handleMergeSelected = useCallback(() => {
+    const newEntries: HistoryEntry[] = [];
     let newRightLines: string[] = [];
+    
     diffRows.forEach(r => {
-      // If row is selected or was already same/added on right, keep/update
       if (selectedRowIds.has(r.id)) {
+        if (r.left.content !== r.right.content) {
+          newEntries.push({
+            id: Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toLocaleTimeString(),
+            source: 'A → B (Bulk)',
+            lineNumber: r.left.lineNumber || 'N/A',
+            oldValue: r.right.content,
+            newValue: r.left.content || ""
+          });
+        }
         if (r.left.content !== null) {
           newRightLines.push(r.left.content);
         }
@@ -395,6 +425,10 @@ export default function App() {
         }
       }
     });
+
+    if (newEntries.length > 0) {
+      setHistory(prev => [...prev, ...newEntries]);
+    }
 
     setRightText(newRightLines.join('\n'));
     setSelectedRowIds(new Set());
@@ -456,6 +490,20 @@ export default function App() {
 
   const handleMergeToC = useCallback((row: AlignedRow) => {
     const sideBContent = row.right.content;
+    const sideCContent = row.sideC.content;
+
+    if (sideBContent === sideCContent) return;
+
+    // Record History
+    const newEntry: HistoryEntry = {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: new Date().toLocaleTimeString(),
+      source: 'B → C',
+      lineNumber: row.sideC.lineNumber || 'N/A',
+      oldValue: sideCContent,
+      newValue: sideBContent || ""
+    };
+    setHistory(prev => [...prev, newEntry]);
     
     let newCLines: string[] = [];
     diffRows.forEach(r => {
@@ -477,6 +525,7 @@ export default function App() {
     setLeftText("");
     setRightText("");
     setSideCText("");
+    setHistory([]);
   };
 
   const handleSwap = () => {
@@ -520,6 +569,12 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setIsHistoryModalOpen(true)}
+            className="btn px-4 py-2 border border-border-main rounded-md text-sm font-medium text-text-main bg-bg-secondary hover:bg-bg-primary transition-all flex items-center gap-2 cursor-pointer mr-2"
+          >
+            <History size={16} /> Versionamento
+          </button>
           <button 
             onClick={() => setIsDocModalOpen(true)}
             className="btn px-4 py-2 border border-border-main rounded-md text-sm font-medium text-text-main bg-bg-secondary hover:bg-bg-primary transition-all flex items-center gap-2 cursor-pointer mr-2"
@@ -954,7 +1009,143 @@ export default function App() {
         isOpen={isDocModalOpen} 
         onClose={() => setIsDocModalOpen(false)} 
       />
+
+      <HistoryModal 
+        isOpen={isHistoryModalOpen} 
+        onClose={() => setIsHistoryModalOpen(false)} 
+        history={history}
+      />
     </div>
+  );
+};
+
+const HistoryModal = ({ isOpen, onClose, history }: { isOpen: boolean, onClose: () => void, history: HistoryEntry[] }) => {
+  const [isCopying, setIsCopying] = useState(false);
+
+  const formatHistoryData = () => {
+    return history.map(h => 
+      `[${h.timestamp}] ${h.source} | Linha: ${h.lineNumber}\nDe: ${h.oldValue || '(vazio)'}\nPara: ${h.newValue}\n`
+    ).join('\n---\n\n');
+  };
+
+  const handleCopy = async () => {
+    setIsCopying(true);
+    await navigator.clipboard.writeText(formatHistoryData());
+    setTimeout(() => setIsCopying(false), 2000);
+  };
+
+  const handleExport = () => {
+    const blob = new Blob([formatHistoryData()], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `versionamento-${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          />
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0, x: 20 }}
+            animate={{ scale: 1, opacity: 1, x: 0 }}
+            exit={{ scale: 0.95, opacity: 0, x: 20 }}
+            className="bg-bg-primary border border-border-main rounded-xl shadow-2xl w-full max-w-6xl max-h-[85vh] overflow-hidden flex flex-col relative z-10"
+          >
+            <div className="p-6 border-b border-border-main flex items-center justify-between bg-bg-secondary shrink-0">
+              <div className="flex items-center gap-3">
+                <History className="text-acc-blue" size={24} />
+                <h2 className="text-xl font-bold tracking-tight">Histórico de Versionamento</h2>
+                <span className="bg-acc-blue/10 text-acc-blue px-2 py-0.5 rounded text-[10px] font-bold uppercase">
+                  {history.length} Alterações
+                </span>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="flex bg-bg-primary rounded-lg p-1 border border-border-main">
+                  <button 
+                    onClick={handleCopy}
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold hover:bg-bg-secondary rounded transition-colors cursor-pointer"
+                  >
+                    {isCopying ? <CheckCircle2 size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                    {isCopying ? 'Copiado' : 'Copiar Histórico'}
+                  </button>
+                  <div className="w-px bg-border-main mx-1" />
+                  <button 
+                    onClick={handleExport}
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold hover:bg-bg-secondary rounded transition-colors cursor-pointer"
+                  >
+                    <Download size={14} /> Exportar Log
+                  </button>
+                </div>
+                <button 
+                  onClick={onClose}
+                  className="p-2 hover:bg-bg-secondary rounded-lg transition-colors cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-auto p-2 bg-bg-secondary/30">
+              {history.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-text-muted">
+                  <History size={48} className="opacity-10 mb-4" />
+                  <p className="text-sm font-medium italic">Nenhum histórico de mesclagem registrado até o momento.</p>
+                  <p className="text-[11px] mt-1">Realize alterações nos trilhos de merge para gerar logs.</p>
+                </div>
+              ) : (
+                <table className="w-full border-collapse text-xs">
+                  <thead className="sticky top-0 bg-bg-primary z-10 shadow-sm">
+                    <tr className="border-b border-border-main uppercase text-[10px] font-bold text-text-muted tracking-widest">
+                      <th className="p-3 text-left w-24">Hora</th>
+                      <th className="p-3 text-left w-32">Origem</th>
+                      <th className="p-3 text-left w-20 text-center">Linha</th>
+                      <th className="p-3 text-left">Valor Antigo</th>
+                      <th className="p-3 text-left w-8 text-center bg-bg-secondary/50"></th>
+                      <th className="p-3 text-left">Valor Novo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((h) => (
+                      <tr key={h.id} className="border-b border-border-main/50 hover:bg-white transition-colors group">
+                        <td className="p-3 text-text-muted font-mono">{h.timestamp}</td>
+                        <td className="p-3">
+                          <span className={cn(
+                            "px-2 py-0.5 rounded-[4px] font-bold text-[9px] uppercase",
+                            h.source.includes('A') ? "bg-acc-blue/10 text-acc-blue" : "bg-purple-100 text-purple-700"
+                          )}>
+                            {h.source}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center font-bold text-text-muted">{h.lineNumber}</td>
+                        <td className="p-3 text-acc-red-dark font-mono bg-acc-red/5 italic truncate max-w-[200px]" title={h.oldValue || ''}>
+                          {h.oldValue || '(vazio)'}
+                        </td>
+                        <td className="p-3 text-center bg-bg-secondary/30 group-hover:bg-acc-blue/10 transition-colors">
+                          <ArrowRight size={12} className="text-text-muted" />
+                        </td>
+                        <td className="p-3 text-acc-green-dark font-mono bg-acc-green/5 font-semibold truncate max-w-[200px]" title={h.newValue}>
+                          {h.newValue}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   );
 };
 
