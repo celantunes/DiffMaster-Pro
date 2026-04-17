@@ -18,7 +18,10 @@ import {
   RefreshCw,
   ArrowLeftRight,
   Maximize2,
-  Minimize2
+  Minimize2,
+  BookOpen,
+  X,
+  Settings2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
@@ -105,6 +108,7 @@ export default function App() {
   const [ignoreWhitespace, setIgnoreWhitespace] = useState(false);
   const [horizontalScroll, setHorizontalScroll] = useState(false);
   const [isFullWidth, setIsFullWidth] = useState(false);
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -516,6 +520,12 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setIsDocModalOpen(true)}
+            className="btn px-4 py-2 border border-border-main rounded-md text-sm font-medium text-text-main bg-bg-secondary hover:bg-bg-primary transition-all flex items-center gap-2 cursor-pointer mr-2"
+          >
+            <BookOpen size={16} /> Documentação
+          </button>
           <button 
             onClick={handleSwap}
             className="btn px-4 py-2 border border-border-main rounded-md text-sm font-medium text-text-main bg-bg-secondary hover:bg-bg-primary transition-all flex items-center gap-2 cursor-pointer"
@@ -939,6 +949,134 @@ export default function App() {
           </footer>
         </div>
       </main>
+
+      <DocumentationModal 
+        isOpen={isDocModalOpen} 
+        onClose={() => setIsDocModalOpen(false)} 
+      />
     </div>
   );
-}
+};
+
+const DocumentationModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          />
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+            className="bg-bg-primary border border-border-main rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col relative z-10"
+          >
+            <div className="p-6 border-b border-border-main flex items-center justify-between bg-bg-secondary">
+              <div className="flex items-center gap-3">
+                <BookOpen className="text-acc-blue" size={24} />
+                <h2 className="text-xl font-bold tracking-tight">Documentação - DiffMaster Pro</h2>
+              </div>
+              <button 
+                onClick={onClose}
+                className="p-2 hover:bg-bg-primary rounded-lg transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-8 overflow-y-auto space-y-8 text-sm leading-relaxed">
+              <section className="space-y-4">
+                <h3 className="text-lg font-bold flex items-center gap-2 text-acc-blue">
+                  <RefreshCw size={18} /> Visão Geral
+                </h3>
+                <p className="text-text-muted">
+                  O <strong>DiffMaster Pro</strong> é uma ferramenta profissional para comparação e mesclagem de textos em tempo real. 
+                  Suporta comparação de até 3 versões simultâneas com sincronização inteligente de rolagem e ações de merge.
+                </p>
+              </section>
+
+              <section className="space-y-4">
+                <h3 className="text-lg font-bold flex items-center gap-2 text-acc-blue">
+                  <Maximize2 size={18} /> Funcionalidades Principais
+                </h3>
+                <ul className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <li className="p-3 bg-bg-secondary rounded-lg border border-border-main">
+                    <strong className="block mb-1">Diff em Tempo Real</strong>
+                    Destaque instantâneo de caracteres adicionados, removidos ou modificados.
+                  </li>
+                  <li className="p-3 bg-bg-secondary rounded-lg border border-border-main">
+                    <strong className="block mb-1">Lado C (3-Vias)</strong>
+                    Ative uma terceira coluna para comparar a evolução de B para C seguindo as mesmas regras de A para B.
+                  </li>
+                  <li className="p-3 bg-bg-secondary rounded-lg border border-border-main">
+                    <strong className="block mb-1">Trilhos de Merge</strong>
+                    Use os botões de seta nos trilhos centrais para mover linhas específicas rapidamente entre os painéis.
+                  </li>
+                  <li className="p-3 bg-bg-secondary rounded-lg border border-border-main">
+                    <strong className="block mb-1">Largura Total</strong>
+                    Expanda a interface para ocupar 100% da tela, ideal para textos longos em telas largas.
+                  </li>
+                </ul>
+              </section>
+
+              <section className="space-y-4">
+                <h3 className="text-lg font-bold flex items-center gap-2 text-acc-blue">
+                  <Settings2 size={18} className="rotate-90" /> Regras de Comparação
+                </h3>
+                <div className="space-y-3 border-l-4 border-acc-blue pl-4">
+                  <p>
+                    <strong>Ignorar Espaços:</strong> Quando ativo, variações que envolvam apenas espaços em branco ou quebras de linha não serão marcadas como diferenças.
+                  </p>
+                  <p>
+                    <strong>Sincronização de Rolagem:</strong> Todos os painéis e o Minimap rolam juntos. Se um texto tiver mais linhas, o sistema cria um "gap" visual para manter o alinhamento das linhas correspondentes.
+                  </p>
+                  <p>
+                    <strong>Exportação Inteligente:</strong> Se o Lado C estiver ativo, os botões de "Copiar" e "Exportar" pegarão o resultado do Lado C (que é o estágio final). Caso contrário, pegam do Lado B.
+                  </p>
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <h3 className="text-lg font-bold flex items-center gap-2 text-acc-blue">
+                   Comandos Rápidos
+                </h3>
+                <div className="grid grid-cols-2 gap-4 text-xs font-mono">
+                  <div className="flex justify-between p-2 border-b border-border-main">
+                    <span>Inverter Lados</span>
+                    <span className="text-acc-blue">A ⇄ B</span>
+                  </div>
+                  <div className="flex justify-between p-2 border-b border-border-main">
+                    <span>Limpar Tudo</span>
+                    <span className="text-acc-blue">Zera A, B e C</span>
+                  </div>
+                  <div className="flex justify-between p-2 border-b border-border-main">
+                    <span>Selecionar Divergências</span>
+                    <span className="text-acc-blue">Seleção em massa</span>
+                  </div>
+                  <div className="flex justify-between p-2 border-b border-border-main">
+                    <span>Scroll Horizontal</span>
+                    <span className="text-acc-blue">Modo linha única</span>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <div className="p-6 border-t border-border-main flex justify-end bg-bg-secondary">
+              <button 
+                onClick={onClose}
+                className="px-6 py-2 bg-acc-blue text-white rounded-lg font-bold hover:bg-acc-blue-dark transition-all shadow-md cursor-pointer"
+              >
+                Entendido
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+};
