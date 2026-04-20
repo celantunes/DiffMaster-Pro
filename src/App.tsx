@@ -137,11 +137,21 @@ export default function App() {
     if (isSyncing.current) return;
     isSyncing.current = true;
     
-    const scrollTop = e.currentTarget.scrollTop;
+    const { scrollTop, scrollLeft } = e.currentTarget;
+    const isMainSource = source === 'A' || source === 'B' || source === 'C';
     
-    if (source !== 'A' && sideARef.current) sideARef.current.scrollTop = scrollTop;
-    if (source !== 'B' && sideBRef.current) sideBRef.current.scrollTop = scrollTop;
-    if (source !== 'C' && sideCRef.current) sideCRef.current.scrollTop = scrollTop;
+    if (source !== 'A' && sideARef.current) {
+      sideARef.current.scrollTop = scrollTop;
+      if (isMainSource) sideARef.current.scrollLeft = scrollLeft;
+    }
+    if (source !== 'B' && sideBRef.current) {
+      sideBRef.current.scrollTop = scrollTop;
+      if (isMainSource) sideBRef.current.scrollLeft = scrollLeft;
+    }
+    if (source !== 'C' && sideCRef.current) {
+      sideCRef.current.scrollTop = scrollTop;
+      if (isMainSource) sideCRef.current.scrollLeft = scrollLeft;
+    }
     if (source !== 'rail' && railRef.current) railRef.current.scrollTop = scrollTop;
     if (source !== 'railBC' && railBCRef.current) railBCRef.current.scrollTop = scrollTop;
     
