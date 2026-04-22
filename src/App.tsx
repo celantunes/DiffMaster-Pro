@@ -108,10 +108,78 @@ const CharacterDiff = ({ text1, text2, mode, ignoreWhitespace }: { text1: string
   );
 };
 
+const NumberedTextarea = ({
+  value,
+  onChange,
+  placeholder,
+  horizontalScroll,
+  syncScrollId,
+  syncScroll,
+  textareaRef
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder: string;
+  horizontalScroll: boolean;
+  syncScrollId: 'A' | 'B' | 'C';
+  syncScroll: (e: React.UIEvent<HTMLTextAreaElement>, source: 'A' | 'B' | 'C') => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+}) => {
+  const lineNumbersRef = useRef<HTMLDivElement>(null);
+  
+  const [localValue, setLocalValue] = useState(value);
+
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (localValue !== value) {
+        onChange(localValue);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [localValue, value, onChange]);
+
+  const linesCount = (localValue.match(/\n/g) || []).length + 1;
+  const linesText = useMemo(() => Array.from({ length: linesCount }, (_, i) => i + 1).join('\n'), [linesCount]);
+
+  return (
+    <div className={cn(
+      "w-full h-32 flex bg-bg-secondary border border-border-main rounded-lg overflow-hidden shadow-sm transition-all focus-within:ring-2 focus-within:ring-acc-blue/20 focus-within:border-acc-blue"
+    )}>
+      <div 
+        ref={lineNumbersRef}
+        className="w-10 bg-slate-50/50 border-r border-slate-100 py-4 pr-2 font-mono text-[11px] leading-[21px] text-slate-400 select-none overflow-hidden shrink-0 text-right whitespace-pre"
+      >
+        {linesText}
+      </div>
+      <textarea
+        ref={textareaRef}
+        value={localValue}
+        onChange={(e) => setLocalValue(e.target.value)}
+        className={cn(
+          "flex-1 p-4 bg-transparent font-mono text-[13px] leading-[21px] focus:outline-none resize-none",
+          horizontalScroll ? "whitespace-pre overflow-auto" : "whitespace-pre-wrap overflow-y-auto"
+        )}
+        placeholder={placeholder}
+        onScroll={(e) => {
+          if (lineNumbersRef.current) {
+            lineNumbersRef.current.scrollTop = e.currentTarget.scrollTop;
+          }
+          syncScroll(e, syncScrollId);
+        }}
+      />
+    </div>
+  );
+};
+
 export default function App() {
   const [leftText, setLeftText] = useState("Apple\nBanana\nCherry\nDate\nElderberry");
   const [rightText, setRightText] = useState("Apple\nBanana\nCitrus\nFig\nGrape");
   const [sideCText, setSideCText] = useState("Apple\nBanana\nCherry\nDurian\nGrape");
+
   const [isSideCActive, setIsSideCActive] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isCopying, setIsCopying] = useState(false);
@@ -130,6 +198,33 @@ export default function App() {
   const railRef = useRef<HTMLDivElement>(null);
   const railBCRef = useRef<HTMLDivElement>(null);
   const minimapRef = useRef<HTMLDivElement>(null);
+
+  const inputARef = useRef<HTMLTextAreaElement>(null);
+  const inputBRef = useRef<HTMLTextAreaElement>(null);
+  const inputCRef = useRef<HTMLTextAreaElement>(null);
+
+  const isInputSyncing = useRef(false);
+  const syncInputScroll = useCallback((e: React.UIEvent<HTMLTextAreaElement>, source: 'A' | 'B' | 'C') => {
+    if (isInputSyncing.current) return;
+    isInputSyncing.current = true;
+    
+    const { scrollTop, scrollLeft } = e.currentTarget;
+    
+    if (source !== 'A' && inputARef.current) {
+      inputARef.current.scrollTop = scrollTop;
+      inputARef.current.scrollLeft = scrollLeft;
+    }
+    if (source !== 'B' && inputBRef.current) {
+      inputBRef.current.scrollTop = scrollTop;
+      inputBRef.current.scrollLeft = scrollLeft;
+    }
+    if (source !== 'C' && inputCRef.current) {
+      inputCRef.current.scrollTop = scrollTop;
+      inputCRef.current.scrollLeft = scrollLeft;
+    }
+    
+    isInputSyncing.current = false;
+  }, []);
 
   // Synchronized scroll logic
   const isSyncing = useRef(false);
@@ -666,43 +761,43 @@ export default function App() {
             <label className="text-[12px] font-semibold text-text-muted uppercase tracking-wider flex items-center gap-2">
               <FileText size={14} /> ORIGINAL (LADO A)
             </label>
-            <textarea 
+            <NumberedTextarea 
               value={leftText}
-              onChange={(e) => setLeftText(e.target.value)}
-              className={cn(
-                "w-full h-32 p-4 bg-bg-secondary border border-border-main rounded-lg font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-acc-blue/20 focus:border-acc-blue transition-all resize-none shadow-sm",
-                horizontalScroll ? "whitespace-pre overflow-x-auto" : "whitespace-pre-wrap"
-              )}
+              onChange={setLeftText}
               placeholder="Cole o texto original aqui..."
+              horizontalScroll={horizontalScroll}
+              syncScrollId="A"
+              syncScroll={syncInputScroll}
+              textareaRef={inputARef}
             />
           </div>
           <div className="space-y-2">
             <label className="text-[12px] font-semibold text-text-muted uppercase tracking-wider flex items-center gap-2">
-              <FileText size={14} /> DESTINO (LADO B)
+              <FileText size={14} /> ORIGINAL (LADO B)
             </label>
-            <textarea 
+            <NumberedTextarea 
               value={rightText}
-              onChange={(e) => setRightText(e.target.value)}
-              className={cn(
-                "w-full h-32 p-4 bg-bg-secondary border border-border-main rounded-lg font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-acc-blue/20 focus:border-acc-blue transition-all resize-none shadow-sm",
-                horizontalScroll ? "whitespace-pre overflow-x-auto" : "whitespace-pre-wrap"
-              )}
+              onChange={setRightText}
               placeholder="Cole a versão para comparar aqui..."
+              horizontalScroll={horizontalScroll}
+              syncScrollId="B"
+              syncScroll={syncInputScroll}
+              textareaRef={inputBRef}
             />
           </div>
           {isSideCActive && (
             <div className="space-y-2">
               <label className="text-[12px] font-semibold text-text-muted uppercase tracking-wider flex items-center gap-2">
-                <FileText size={14} /> OUTRO (LADO C)
+                <FileText size={14} /> ORIGINAL (LADO C)
               </label>
-              <textarea 
+              <NumberedTextarea 
                 value={sideCText}
-                onChange={(e) => setSideCText(e.target.value)}
-                className={cn(
-                  "w-full h-32 p-4 bg-bg-secondary border border-border-main rounded-lg font-mono text-[13px] focus:outline-none focus:ring-2 focus:ring-acc-blue/20 focus:border-acc-blue transition-all resize-none shadow-sm",
-                  horizontalScroll ? "whitespace-pre overflow-x-auto" : "whitespace-pre-wrap"
-                )}
+                onChange={setSideCText}
                 placeholder="Cole a terceira versão aqui..."
+                horizontalScroll={horizontalScroll}
+                syncScrollId="C"
+                syncScroll={syncInputScroll}
+                textareaRef={inputCRef}
               />
             </div>
           )}
@@ -815,22 +910,29 @@ export default function App() {
               {/* Middle Rail Column (A to B) */}
               <div 
                 ref={railRef}
-                className="w-[40px] bg-slate-100 border-r border-border-main overflow-hidden shrink-0 flex-shrink-0"
+                className="w-[40px] bg-slate-100 border-r border-border-main overflow-hidden shrink-0 flex-shrink-0 font-mono text-[13px] line-height-[1.6]"
               >
                 <div className="sticky top-0 bg-slate-200 border-b border-border-main z-10 h-8 flex items-center justify-center">
                   <span className="text-[10px] font-bold text-slate-400">#</span>
                 </div>
                 {diffRows.map((row) => (
-                  <div key={`rail-${row.id}`} className="h-[25px] flex items-center justify-center border-b border-slate-200 bg-slate-100">
-                    {row.type !== 'unchanged' && row.left.content !== null && (
-                      <button 
-                        onClick={() => handleMergeToRight(row)}
-                        className="w-5 h-5 flex items-center justify-center text-acc-blue hover:bg-acc-blue hover:text-white rounded-full transition-all cursor-pointer"
-                        title="Merge A -> B"
-                      >
-                        <ArrowRight size={10} strokeWidth={3} />
-                      </button>
-                    )}
+                  <div key={`rail-${row.id}`} className="flex items-stretch border-b border-slate-200 bg-slate-100">
+                    <div className="flex-1 py-1 min-h-[24px] flex items-center justify-center relative">
+                      <span className="opacity-0 pointer-events-none select-none">|</span>
+                      {/* Funcionalidade de setas temporariamente desativada
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        {row.type !== 'unchanged' && (
+                          <button 
+                            onClick={() => handleMergeToRight(row)}
+                            className="w-5 h-5 flex items-center justify-center text-acc-blue hover:bg-acc-blue hover:text-white rounded-full transition-all cursor-pointer"
+                            title="Merge A -> B"
+                          >
+                            <ArrowRight size={10} strokeWidth={3} />
+                          </button>
+                        )}
+                      </div>
+                      */}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -890,22 +992,29 @@ export default function App() {
               {isSideCActive && (
                 <div 
                   ref={railBCRef}
-                  className="w-[40px] bg-slate-100 border-r border-border-main overflow-hidden shrink-0 flex-shrink-0"
+                  className="w-[40px] bg-slate-100 border-r border-border-main overflow-hidden shrink-0 flex-shrink-0 font-mono text-[13px] line-height-[1.6]"
                 >
                   <div className="sticky top-0 bg-slate-200 border-b border-border-main z-10 h-8 flex items-center justify-center">
                     <span className="text-[10px] font-bold text-slate-400">#</span>
                   </div>
                   {diffRows.map((row) => (
-                    <div key={`rail-bc-${row.id}`} className="h-[25px] flex items-center justify-center border-b border-slate-200 bg-slate-100">
-                      {row.right.content !== null && row.right.content !== row.sideC.content && (
-                        <button 
-                          onClick={() => handleMergeToC(row)}
-                          className="w-5 h-5 flex items-center justify-center text-acc-blue hover:bg-acc-blue hover:text-white rounded-full transition-all cursor-pointer"
-                          title="Merge B -> C"
-                        >
-                          <ArrowRight size={10} strokeWidth={3} />
-                        </button>
-                      )}
+                    <div key={`rail-bc-${row.id}`} className="flex items-stretch border-b border-slate-200 bg-slate-100">
+                      <div className="flex-1 py-1 min-h-[24px] flex items-center justify-center relative">
+                        <span className="opacity-0 pointer-events-none select-none">|</span>
+                        {/* Funcionalidade de setas temporariamente desativada
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          {row.right.content !== row.sideC.content && (
+                            <button 
+                              onClick={() => handleMergeToC(row)}
+                              className="w-5 h-5 flex items-center justify-center text-acc-blue hover:bg-acc-blue hover:text-white rounded-full transition-all cursor-pointer"
+                              title="Merge B -> C"
+                            >
+                              <ArrowRight size={10} strokeWidth={3} />
+                            </button>
+                          )}
+                        </div>
+                        */}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -969,20 +1078,26 @@ export default function App() {
               onMouseDown={handleMinimapClick}
               className="w-16 h-full bg-slate-50 border-l border-border-main shrink-0 cursor-crosshair relative select-none hover:bg-slate-100 transition-colors"
             >
-              <div className="absolute inset-0 flex flex-col">
-                {diffRows.map((row) => (
-                  <div 
-                    key={`mini-${row.id}`}
-                    className={cn(
-                      "w-full flex-1",
-                      row.type === 'added' ? "bg-emerald-400" :
-                      row.type === 'removed' ? "bg-red-400" :
-                      row.type === 'modified' ? "bg-amber-400" :
-                      "bg-transparent"
-                    )}
-                    style={{ flexBasis: `${100 / Math.max(diffRows.length, 1)}%` }}
-                  />
-                ))}
+              <div className="absolute inset-0">
+                {diffRows.map((row, index) => {
+                  if (row.type === 'unchanged') return null;
+                  return (
+                    <div 
+                      key={`mini-${row.id}`}
+                      className={cn(
+                        "absolute w-full opacity-80",
+                        row.type === 'added' ? "bg-emerald-400" :
+                        row.type === 'removed' ? "bg-red-400" :
+                        "bg-amber-400"
+                      )}
+                      style={{ 
+                        top: `${(index / Math.max(diffRows.length, 1)) * 100}%`,
+                        height: `${Math.max(100 / Math.max(diffRows.length, 1), 0.5)}%`,
+                        minHeight: '2px'
+                      }}
+                    />
+                  );
+                })}
               </div>
               <div className="absolute top-0 right-0 p-1 bg-white/80 text-[8px] font-bold text-text-muted uppercase rotate-90 origin-top-right whitespace-nowrap">
                 Minimap
